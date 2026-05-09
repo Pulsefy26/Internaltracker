@@ -5,7 +5,7 @@ export default async function query(text, params = []) {
     const result = await sql.query(text, params);
     return result;
   } catch (err) {
-    console.error('Database error:', err);
-    throw new Error('Database query failed');
+    console.error('Database query error:', err);
+    throw new Error('Database query failed: ' + err.message);
   }
 }
