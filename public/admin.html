@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Custom Connect – Admin Console</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0f172a; font-family: system-ui, 'Segoe UI', sans-serif; padding: 24px; color: #e2e8f0; }
+    .container { max-width: 1600px; margin: 0 auto; }
+    .card { background: #1e293b; border-radius: 24px; padding: 20px; margin-bottom: 24px; }
+    h1, h2 { color: #facc15; margin-bottom: 16px; }
+    input, select, textarea, button { background: #334155; border: 1px solid #475569; color: white; padding: 8px 14px; border-radius: 40px; }
+    button { background: #3b82f6; cursor: pointer; font-weight: 600; margin-right: 8px; }
+    .btn-red { background: #ef4444; }
+    .btn-green { background: #10b981; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); gap: 20px; margin-bottom: 20px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #334155; font-size: 0.8rem; }
+    .badge { padding: 2px 8px; border-radius: 30px; font-size: 0.7rem; }
+    .filters { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; align-items: end; }
+    .brand-footer { text-align: center; margin-top: 32px; font-size: 0.65rem; color: #5f7f9e; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div style="display: flex; justify-content: space-between;"><h1>🔧 Custom Connect Admin</h1><button onclick="logout()" class="btn-red">Logout</button></div>
+  <div class="card"><h2>📊 Department Targets & Progress</h2><div class="grid" id="targetProgress"></div><div><select id="deptSelect"><option value="Customer Service">Customer Service</option></select><input type="number" id="newTarget" placeholder="Daily target"><button onclick="setTarget()">Set Target</button></div></div>
+  <div class="card"><h2>👥 Manage Agents</h2><div class="grid"><input type="text" id="agentName" placeholder="Full name"><select id="agentDept"><option value="Customer Service">Customer Service</option></select><input type="number" id="maxCases" placeholder="Max open cases (default 50)"><button onclick="createAgent()">Create Agent (auto password)</button></div><div id="agentsList"></div></div>
+  <div class="card"><h2>📋 Cases & Assignments</h2><div class="filters"><select id="filterAgent"></select><select id="filterDept"></select><select id="filterStatus"><option value="all">All status</option><option value="pending">Pending</option><option value="acknowledged">Acknowledged</option><option value="completed">Completed</option><option value="closed">Closed</option></select><select id="filterResolution"><option value="all">All resolutions</option><option value="awaiting customer response">Awaiting</option><option value="closed">Closed</option></select><input type="text" id="searchCase" placeholder="Search case #"><button onclick="loadAssignments()">Filter</button><button class="btn-green" onclick="exportExcel()">📎 Export Excel</button></div>
+    <div style="overflow-x: auto;"><table id="assignTable"><thead><tr><th>Case #</th><th>Agent</th><th>Dept</th><th>Status</th><th>Resolution</th><th>Actions</th></tr></thead><tbody id="assignBody"></tbody></table></div>
+  </div>
+  <div class="card"><h2>📤 Manual & Auto Dispatch</h2><div><h4>Create new case</h4><input type="text" id="newCaseNumber" placeholder="Case number *"><input type="text" id="newAccount" placeholder="Account number"><select id="newTaskType"><option>Water Order</option><option>Chase</option><option>Amend</option></select><button onclick="createCase()">Add Case</button></div><div style="margin-top:16px;"><h4>Assign manually</h4><select id="assignCaseSelect"></select><select id="assignAgentSelect"></select><button onclick="assignManual()">Assign case</button></div><div><h4>Auto dispatch (to department)</h4><select id="autoDept"><option>Customer Service</option></select><input type="number" id="autoCount" placeholder="Number of cases"><button onclick="autoAssign()">Auto-distribute</button></div>
+  </div>
+  <div class="card"><h2>📝 Global Templates</h2><div><input type="text" id="globalTplName" placeholder="Template name"><textarea id="globalTplContent" rows="2" placeholder="Content... {input customer name}"></textarea><button onclick="createGlobalTemplate()">Save Global Template</button></div><div id="globalTemplatesList"></div></div>
+  <div class="brand-footer">Sengxne Tech solutions | Durban — Internal Tool</div>
+</div>
+<script>
+  let token = null, users = [], assignments = [], unassignedCases = [];
+  async function api(endpoint, opts={}) { const headers={'Content-Type':'application/json'}; if(token) headers['Authorization']=`Bearer ${token}`; const res=await fetch(endpoint, {...opts, headers}); if(!res.ok) throw new Error((await res.json()).error); return res.json(); }
+  function logout() { localStorage.clear(); window.location.href='/'; }
+  async function loadAdmin() { const stored=localStorage.getItem('token'); if(!stored){ window.location.href='/'; return; } token=stored; await Promise.all([loadAgents(), loadAssignments(), loadUnassignedCases(), loadTargetProgress(), loadGlobalTemplates()]); }
+  async function loadAgents() { const data=await api('/api/users'); users=data; const agentSelect=document.getElementById('assignAgentSelect'); agentSelect.innerHTML='<option value="">Select agent</option>'+data.map(u=>`<option value="${u.id}">${u.full_name} (${u.department})</option>`).join(''); document.getElementById('filterAgent').innerHTML='<option value="all">All agents</option>'+data.map(u=>`<option value="${u.id}">${u.full_name}</option>`).join(''); document.getElementById('agentsList').innerHTML=data.map(a=>`<div>${a.full_name} | Dept: ${a.department} | Max: ${a.max_open_cases} | Active: ${a.is_active?'✅':'❌'} <button onclick="toggleAgent(${a.id},${!a.is_active})">${a.is_active?'Disable':'Enable'}</button></div>`).join(''); }
+  async function createAgent() { const full_name=document.getElementById('agentName').value.trim(), department=document.getElementById('agentDept').value, max_open_cases=document.getElementById('maxCases').value; if(!full_name) return alert('Name required'); const res=await api('/api/auth/register', {method:'POST', body:JSON.stringify({full_name, department, max_open_cases})}); alert(`Agent ${res.full_name} created. Password: ${res.password}`); loadAgents(); }
+  async function loadAssignments() { const agent=document.getElementById('filterAgent').value, dept=document.getElementById('filterDept').value, status=document.getElementById('filterStatus').value, resolution=document.getElementById('filterResolution').value, search=document.getElementById('searchCase').value; const data=await api(`/api/assignments?agent_id=${agent}&department=${dept}&status=${status}&resolution=${resolution}&search=${encodeURIComponent(search)}`); assignments=data; renderAssignments(); }
+  function renderAssignments() { const tbody=document.getElementById('assignBody'); if(!assignments.length){ tbody.innerHTML='<tr><td colspan="6">No assignments</td></tr>'; return; } tbody.innerHTML=assignments.map(a=>`<tr><td>${a.case_number}</td><td>${a.agent_name}</td><td>${a.department||'—'}</td><td>${a.status}</td><td>${a.resolution||'—'}</td><td><button onclick="reassign(${a.id})">Reassign</button></td></tr>`).join(''); }
+  async function loadUnassignedCases() { const data=await api('/api/cases'); unassignedCases=data; const select=document.getElementById('assignCaseSelect'); select.innerHTML='<option value="">Select case</option>'+data.map(c=>`<option value="${c.id}">${c.case_number}</option>`).join(''); }
+  async function assignManual() { const caseId=document.getElementById('assignCaseSelect').value, agentId=document.getElementById('assignAgentSelect').value; if(!caseId||!agentId) return alert('Select case and agent'); await api('/api/assignments', {method:'POST', body:JSON.stringify({case_ids:[caseId], agent_id:agentId})}); alert('Assigned'); loadAssignments(); loadUnassignedCases(); }
+  async function autoAssign() { const department=document.getElementById('autoDept').value, count=parseInt(document.getElementById('autoCount').value); if(!count) return alert('Enter number of cases'); const res=await api('/api/assignments/auto', {method:'POST', body:JSON.stringify({department, number_of_cases:count})}); alert(`Assigned ${res.assigned} cases`); loadAssignments(); loadUnassignedCases(); }
+  async function createCase() { const case_number=document.getElementById('newCaseNumber').value.trim(), account_number=document.getElementById('newAccount').value.trim(), task_type=document.getElementById('newTaskType').value; if(!case_number) return alert('Case number required'); await api('/api/cases', {method:'POST', body:JSON.stringify({case_number, account_number, task_type})}); alert('Case created'); document.getElementById('newCaseNumber').value=''; loadUnassignedCases(); }
+  async function loadTargetProgress() { const dept=document.getElementById('deptSelect').value; const data=await api(`/api/targets?department=${dept}`); document.getElementById('targetProgress').innerHTML=`<div>🎯 Target: ${data.target}</div><div>✅ Completed: ${data.completed}</div><div>📉 Remaining: ${data.remaining}</div><div>🏆 Leader: ${data.leaderboard[0]?.full_name||'—'} (${data.leaderboard[0]?.closed_count||0})</div>`; }
+  async function setTarget() { const department=document.getElementById('deptSelect').value, target_cases=parseInt(document.getElementById('newTarget').value); if(isNaN(target_cases)) return; await api('/api/targets', {method:'POST', body:JSON.stringify({department, target_cases})}); alert('Target set'); loadTargetProgress(); }
+  async function loadGlobalTemplates() { const data=await api('/api/templates'); const globals=data.filter(t=>t.is_global); document.getElementById('globalTemplatesList').innerHTML=globals.map(t=>`<div><strong>${t.name}</strong> <button onclick="copyTemplate('${escape(t.content).replace(/'/g,"\\'")}')">copy</button> <button onclick="deleteTemplate(${t.id})">delete</button><br><span style="font-size:0.7rem;">${t.content.substring(0,80)}</span></div>`).join(''); }
+  async function createGlobalTemplate() { const name=document.getElementById('globalTplName').value.trim(), content=document.getElementById('globalTplContent').value.trim(); if(!name||!content) return; await api('/api/templates', {method:'POST', body:JSON.stringify({name, content, is_global:true})}); document.getElementById('globalTplName').value=''; document.getElementById('globalTplContent').value=''; loadGlobalTemplates(); }
+  async function deleteTemplate(id) { if(confirm('Delete template?')){ await api(`/api/templates?id=${id}`, {method:'DELETE'}); loadGlobalTemplates(); } }
+  function copyTemplate(content) { navigator.clipboard.writeText(content); alert('Copied!'); }
+  function exportExcel() { window.open('/api/export', '_blank'); }
+  function escape(str) { if(!str) return ''; return str.replace(/[&<>]/g, function(m){ if(m==='&') return '&amp;'; if(m==='<') return '&lt;'; if(m==='>') return '&gt;'; return m;}); }
+  window.onload = loadAdmin;
+</script>
+</body>
+</html>

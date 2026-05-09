@@ -1,0 +1,14 @@
+{
+  "functions": {
+    "api/**/*.js": {
+      "runtime": "nodejs20.x",
+      "maxDuration": 10
+    }
+  },
+  "rewrites": [
+    { "source": "/agent", "destination": "/agent.html" },
+    { "source": "/admin", "destination": "/admin.html" },
+    { "source": "/", "destination": "/login.html" },
+    { "source": "/(.*)", "destination": "/$1" }
+  ]
+}

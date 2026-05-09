@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <title>Custom Connect – Agent Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #f4f7fc; font-family: system-ui, 'Segoe UI', Roboto, sans-serif; padding: 20px; }
+    .container { max-width: 1400px; margin: 0 auto; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+    h1 { font-size: 1.8rem; color: #0b2b3b; }
+    .logout-btn { background: #e53e3e; color: white; border: none; padding: 8px 20px; border-radius: 30px; cursor: pointer; font-weight: 600; }
+    .card { background: white; border-radius: 24px; padding: 20px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); gap: 20px; }
+    .stats { background: #eef2f5; border-radius: 20px; padding: 16px; text-align: center; }
+    .stats-number { font-size: 2rem; font-weight: 800; color: #1a4a6f; }
+    .filter-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 20px; }
+    .filter-bar select, .filter-bar input, .filter-bar button { padding: 8px 14px; border-radius: 40px; border: 1px solid #cbd5e1; background: white; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid #e2e8f0; font-size: 0.85rem; }
+    th { background: #f8fafc; color: #1e4a6e; }
+    .badge { padding: 4px 10px; border-radius: 40px; font-size: 0.7rem; font-weight: 600; display: inline-block; }
+    .pending { background: #fef9e3; color: #b45f06; }
+    .acknowledged { background: #e0f2fe; color: #0369a1; }
+    .completed { background: #dcfce7; color: #15803d; }
+    .closed { background: #e6e6fa; color: #4c1d95; }
+    .btn-sm { background: #1a4a6f; color: white; border: none; padding: 6px 14px; border-radius: 30px; cursor: pointer; font-size: 0.75rem; }
+    .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1000; visibility: hidden; }
+    .modal.open { visibility: visible; }
+    .modal-content { background: white; border-radius: 28px; max-width: 700px; width: 90%; max-height: 85vh; overflow-y: auto; padding: 24px; }
+    .template-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+    .template-item { background: #eef2f5; padding: 6px 12px; border-radius: 40px; font-size: 0.75rem; cursor: pointer; }
+    .copy-btn { background: #2c9cd4; color: white; border: none; border-radius: 20px; padding: 2px 8px; margin-left: 8px; cursor: pointer; }
+    .brand-footer { text-align: center; margin-top: 32px; font-size: 0.65rem; color: #8ba0b5; }
+    .note-area { margin-top: 12px; }
+    textarea { width: 100%; border: 1px solid #cbd5e1; border-radius: 16px; padding: 10px; font-family: monospace; }
+    @media (max-width: 700px) { th, td { font-size: 0.7rem; padding: 8px 6px; } }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="header"><h1>📋 Agent Dashboard – Custom Connect</h1><button class="logout-btn" onclick="logout()">Logout</button></div>
+  <div class="card"><div class="grid-2" id="personalStats"></div></div>
+  <div class="card">
+    <h3>📌 My Assignments</h3>
+    <div class="filter-bar">
+      <select id="filterStatus"><option value="all">All status</option><option value="pending">Pending</option><option value="acknowledged">Acknowledged</option><option value="completed">Completed</option><option value="closed">Closed</option></select>
+      <select id="filterResolution"><option value="all">All resolutions</option><option value="awaiting customer response">Awaiting response</option><option value="closed">Closed</option></select>
+      <input type="text" id="searchInput" placeholder="Search case # / account">
+      <button onclick="loadAssignments()">Apply filters</button>
+    </div>
+    <div style="overflow-x: auto;"><table id="assignmentsTable"><thead><tr><th>Case #</th><th>Account</th><th>Task</th><th>Status</th><th>Resolution</th><th>Assigned</th><th>Actions</th></tr></thead><tbody id="assignmentsBody"></tbody></table></div>
+  </div>
+  <div class="card">
+    <h3>✏️ My Templates</h3>
+    <div id="templatesList" style="margin-bottom: 12px;"></div>
+    <div><input type="text" id="newTemplateName" placeholder="Template name"> <textarea id="newTemplateContent" rows="2" placeholder="Template content... use {input customer name} as placeholder"></textarea> <button onclick="createTemplate()">+ Save Template</button></div>
+  </div>
+  <div class="brand-footer">Sengxne Tech solutions | Durban — Internal Tool</div>
+</div>
+<div id="workModal" class="modal"><div class="modal-content"><h3>Work on Case</h3><div id="modalContent"></div><button onclick="closeModal()">Cancel</button><button onclick="submitWork()" style="background:#1a4a6f;">Submit Case</button></div></div>
+<script>
+  let token = null, currentUser = null, currentAssignment = null, templates = [];
+  async function api(endpoint, opts={}) { const headers = {'Content-Type':'application/json'}; if(token) headers['Authorization']=`Bearer ${token}`; const res = await fetch(endpoint, {...opts, headers}); if(!res.ok) throw new Error((await res.json()).error); return res.json(); }
+  function logout() { localStorage.clear(); window.location.href='/'; }
+  async function loadUser() { const stored = localStorage.getItem('token'); if(!stored){ window.location.href='/'; return; } token=stored; const userStr=localStorage.getItem('user'); if(userStr) currentUser=JSON.parse(userStr); await Promise.all([loadAssignments(), loadTemplates(), loadStats()]); }
+  async function loadAssignments() { const status=document.getElementById('filterStatus').value, resolution=document.getElementById('filterResolution').value, search=document.getElementById('searchInput').value; const data=await api(`/api/assignments?status=${status}&resolution=${resolution}&search=${encodeURIComponent(search)}`); renderAssignments(data); }
+  function renderAssignments(assignments) { const tbody=document.getElementById('assignmentsBody'); if(!assignments.length){ tbody.innerHTML='<tr><td colspan="7">No assignments</td></tr>'; return; } tbody.innerHTML=assignments.map(a=>`<tr><td>${escape(a.case_number)}</td><td>${escape(a.account_number||'')}</td><td>${a.task_type}</td><td><span class="badge ${a.status}">${a.status}</span></td><td>${a.resolution||'—'}</td><td>${new Date(a.assigned_at).toLocaleDateString()}</td><td>${a.status==='pending'?`<button class="btn-sm" onclick="acknowledge(${a.id})">Acknowledge</button>`:a.status==='acknowledged'?`<button class="btn-sm" onclick="openWorkModal(${a.id})">Work on case</button>`:'—'}</td></tr>`).join(''); }
+  async function acknowledge(id) { await api('/api/assignments/acknowledge', {method:'POST', body:JSON.stringify({assignment_id:id})}); loadAssignments(); alert('Case acknowledged – you may now work on it.'); }
+  async function openWorkModal(id) { currentAssignment = (await api('/api/assignments')).find(a=>a.id===id); if(!currentAssignment) return; const modal=document.getElementById('workModal'); document.getElementById('modalContent').innerHTML=`<div>Case: ${escape(currentAssignment.case_number)}</div><label>Actions Taken</label><textarea id="workActions" rows="2">${currentAssignment.actions_taken||''}</textarea><label>Comment / Notes</label><textarea id="workComment" rows="2">${currentAssignment.comment||''}</textarea><label>Resolution</label><select id="workResolution"><option value="awaiting customer response">Awaiting customer response</option><option value="closed">Closed</option></select><label>Personal Notes (only visible to you)</label><textarea id="workNotes" rows="2">${currentAssignment.notes||''}</textarea><div class="note-area">📋 Templates: <div id="modalTemplates" class="template-list"></div></div>`; const tplDiv=document.getElementById('modalTemplates'); tplDiv.innerHTML=templates.map(t=>`<div class="template-item" onclick="copyTemplate('${escape(t.content).replace(/'/g, "\\'")}')">${escape(t.name)} <span class="copy-btn">copy</span></div>`).join(''); modal.classList.add('open'); }
+  function copyTemplate(content) { navigator.clipboard.writeText(content); alert('Template copied to clipboard!'); }
+  async function submitWork() { const actions=document.getElementById('workActions').value.trim(), comment=document.getElementById('workComment').value.trim(), resolution=document.getElementById('workResolution').value, notes=document.getElementById('workNotes').value; if(!resolution) return alert('Select resolution'); if(!actions) return alert('Actions taken required'); const case_fields={actions_taken:actions, comment:comment}; await api('/api/assignments/submit', {method:'POST', body:JSON.stringify({assignment_id:currentAssignment.id, resolution, case_fields, notes})}); closeModal(); loadAssignments(); loadStats(); alert('Case submitted!'); }
+  async function loadTemplates() { const data=await api('/api/templates'); templates=data; const container=document.getElementById('templatesList'); container.innerHTML=data.map(t=>`<div style="margin-bottom:8px;"><strong>${escape(t.name)}</strong> ${t.is_global?'🌍 global':''} <button onclick="copyTemplate('${escape(t.content).replace(/'/g, "\\'")}')">copy</button> <button onclick="deleteTemplate(${t.id})">delete</button><br><span style="font-size:0.7rem;">${escape(t.content.substring(0,80))}</span></div>`).join(''); }
+  async function createTemplate() { const name=document.getElementById('newTemplateName').value.trim(), content=document.getElementById('newTemplateContent').value.trim(); if(!name||!content) return alert('Name and content required'); await api('/api/templates', {method:'POST', body:JSON.stringify({name, content, is_global:false})}); document.getElementById('newTemplateName').value=''; document.getElementById('newTemplateContent').value=''; loadTemplates(); }
+  async function deleteTemplate(id) { if(confirm('Delete template?')){ await api(`/api/templates?id=${id}`, {method:'DELETE'}); loadTemplates(); } }
+  async function loadStats() { if(!currentUser?.department) return; const data=await api(`/api/targets?department=${currentUser.department}`); const myCompleted=await api(`/api/assignments?status=closed`); const myCount=myCompleted.filter(a=>a.resolution==='closed' && new Date(a.closed_at).toDateString()===new Date().toDateString()).length; document.getElementById('personalStats').innerHTML=`<div class="stats"><div class="stats-number">${myCount}</div><div>✅ Completed today</div></div><div class="stats"><div class="stats-number">${data.completed||0}</div><div>📊 Dept completed today</div></div><div class="stats"><div class="stats-number">${data.remaining||0}</div><div>🎯 Remaining to target</div></div><div class="stats"><div class="stats-number">${data.leaderboard?.[0]?.full_name||'—'}</div><div>🏆 Leading agent</div></div>`; }
+  function closeModal() { document.getElementById('workModal').classList.remove('open'); }
+  function escape(str) { if(!str) return ''; return str.replace(/[&<>]/g, function(m){ if(m==='&') return '&amp;'; if(m==='<') return '&lt;'; if(m==='>') return '&gt;'; return m;}); }
+  // 10 min inactivity ping – no logout, just keep token alive by silently refreshing? We'll just do nothing, token lasts 24h.
+  let inactivityTimer; function resetTimer() { clearTimeout(inactivityTimer); inactivityTimer = setTimeout(() => { console.log('10 min inactivity – session still valid'); }, 600000); } window.onload = () => { loadUser(); setInterval(()=>{ if(token) loadAssignments(); }, 30000); document.onmousemove = resetTimer; document.onkeypress = resetTimer; resetTimer(); };
+</script>
+</body>
+</html>

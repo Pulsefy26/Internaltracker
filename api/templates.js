@@ -1,0 +1,47 @@
+import query from './_lib/db';
+import { verifyToken } from './_lib/auth';
+
+export default async function handler(req, res) {
+  try {
+    const user = verifyToken(req);
+    if (req.method === 'GET') {
+      // Get global templates + user's own templates
+      const result = await query(
+        `SELECT * FROM templates WHERE is_global = true OR user_id = $1 ORDER BY is_global DESC, name`,
+        [user.id]
+      );
+      return res.json(result.rows);
+    }
+    if (req.method === 'POST') {
+      const { name, content, is_global } = req.body;
+      if (!name || !content) return res.status(400).json({ error: 'Name and content required' });
+      if (is_global && user.role !== 'admin') return res.status(403).json({ error: 'Only admin can create global templates' });
+      const result = await query(
+        `INSERT INTO templates (name, content, user_id, is_global) VALUES ($1, $2, $3, $4) RETURNING *`,
+        [name, content, is_global ? null : user.id, !!is_global]
+      );
+      res.status(201).json(result.rows[0]);
+    }
+    if (req.method === 'PUT') {
+      const { id } = req.query;
+      const { name, content } = req.body;
+      const template = await query('SELECT * FROM templates WHERE id = $1', [id]);
+      if (!template.rows.length) return res.status(404).json({ error: 'Template not found' });
+      if (template.rows[0].is_global && user.role !== 'admin') return res.status(403).json({ error: 'Cannot edit global template' });
+      if (!template.rows[0].is_global && template.rows[0].user_id !== user.id) return res.status(403).json({ error: 'Not your template' });
+      await query('UPDATE templates SET name = $1, content = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3', [name, content, id]);
+      res.json({ message: 'Template updated' });
+    }
+    if (req.method === 'DELETE') {
+      const { id } = req.query;
+      const template = await query('SELECT * FROM templates WHERE id = $1', [id]);
+      if (!template.rows.length) return res.status(404).json({ error: 'Template not found' });
+      if (template.rows[0].is_global && user.role !== 'admin') return res.status(403).json({ error: 'Cannot delete global template' });
+      if (!template.rows[0].is_global && template.rows[0].user_id !== user.id) return res.status(403).json({ error: 'Not your template' });
+      await query('DELETE FROM templates WHERE id = $1', [id]);
+      res.json({ message: 'Template deleted' });
+    }
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+}
